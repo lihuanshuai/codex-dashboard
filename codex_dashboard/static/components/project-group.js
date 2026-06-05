@@ -1,10 +1,18 @@
 import { html, nothing } from '../vendor/lit.js';
 import { LightDomElement } from './base.js';
 import { shortPath } from '../utils.js';
-import './session-card.js';
+import './session-card.js?v=20260605b';
 
 class CodexProjectGroup extends LightDomElement {
-  static properties = { group: { type: Object } };
+  static properties = {
+    group: { type: Object },
+    liveApprovalCallIds: { type: Array },
+  };
+
+  constructor() {
+    super();
+    this.liveApprovalCallIds = [];
+  }
 
   render() {
     const group = this.group;
@@ -25,7 +33,12 @@ class CodexProjectGroup extends LightDomElement {
             ${group.approval_denied ? html`<span class="badge approval-denied">${group.approval_denied} denied</span>` : nothing}
           </div>
         </header>
-        ${group.sessions.map((session) => html`<codex-session-card .session=${session}></codex-session-card>`)}
+        ${group.sessions.map((session) => html`
+          <codex-session-card
+            .session=${session}
+            .liveApprovalCallIds=${this.liveApprovalCallIds}
+          ></codex-session-card>
+        `)}
       </section>
     `;
   }

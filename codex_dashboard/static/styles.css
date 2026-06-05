@@ -266,24 +266,127 @@
       overflow: hidden;
     }
     .approval-note {
-      width: max-content;
       max-width: 100%;
       margin-top: 10px;
       border-left: 3px solid #d85c27;
-      padding: 8px 10px;
+      padding: 10px;
       background: rgba(255, 176, 58, .14);
       color: #5f3700;
       border-radius: 10px;
+      font: 13px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .approval-text,
+    .approval-command {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      font: 13px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
     }
+    .approval-command {
+      margin-top: 5px;
+      color: rgba(95, 55, 0, .72);
+    }
+    .approval-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 9px;
+    }
+    .approval-button {
+      border: 1px solid rgba(31, 27, 22, .16);
+      border-radius: 999px;
+      padding: 7px 10px;
+      background: rgba(255,250,240,.82);
+      color: var(--ink);
+      cursor: pointer;
+      font: 700 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .approval-button.primary { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
+    .approval-button.danger { color: var(--red); }
+    .approval-button:hover { transform: translateY(-1px); }
+    .approval-stale {
+      margin-top: 9px;
+      color: rgba(95, 55, 0, .72);
+      white-space: normal;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .approval-open-link {
+      appearance: none;
+      display: inline-flex;
+      width: fit-content;
+      margin-top: 9px;
+      border: 1px solid rgba(31, 27, 22, .16);
+      border-radius: 999px;
+      padding: 7px 10px;
+      background: rgba(255,250,240,.82);
+      color: var(--ink);
+      cursor: pointer;
+      text-decoration: none;
+      font: 700 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .approval-open-link:hover { transform: translateY(-1px); }
     .side {
       display: grid;
       gap: 18px;
     }
     .side .panel { padding: 18px; }
+    .bridge-card {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .bridge-card p { margin: 0; }
+    .bridge-card code {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 8px 10px;
+      background: rgba(255,255,255,.34);
+      color: var(--ink);
+      font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .live-approvals {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .approval-section-title {
+      margin-top: 4px;
+      color: var(--muted);
+      font: 800 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .live-approval {
+      border: 1px solid rgba(138, 75, 0, .18);
+      border-radius: 16px;
+      padding: 12px;
+      background: rgba(255, 176, 58, .12);
+    }
+    .live-approval.stale {
+      border-color: rgba(117,110,100,.16);
+      background: rgba(117,110,100,.08);
+    }
+    .live-approval-command {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--ink);
+      font: 800 13px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .live-approval-meta,
+    .live-approval-reason {
+      margin-top: 6px;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
     .cwd-list, .legend { display: grid; gap: 12px; margin-top: 14px; }
     .cwd-item {
       display: grid;
@@ -294,6 +397,7 @@
     }
     .cwd-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .empty { padding: 42px 20px; color: var(--muted); text-align: center; }
+    .empty.compact { padding: 14px 6px; }
     .dialog-backdrop {
       position: fixed;
       inset: 0;

@@ -15,6 +15,7 @@ class ApprovalRequest(BaseModel):
     tool: str
     command: str = ""
     justification: str = ""
+    prefix_rule: list[str] = Field(default_factory=list)
     status: str = "pending"
     requested_at: str | None = None
     resolved_at: str | None = None
@@ -441,6 +442,7 @@ def _extract_approval_request(payload: dict[str, Any], timestamp: Any) -> Approv
         tool=str(payload.get("name") or "unknown"),
         command=str(arguments.get("cmd") or arguments.get("command") or ""),
         justification=str(arguments.get("justification") or ""),
+        prefix_rule=_prefix_rule(arguments.get("prefix_rule")),
         requested_at=_from_epoch_or_iso(None, timestamp),
     )
 
@@ -463,6 +465,12 @@ def _requires_approval(arguments: dict[str, Any]) -> bool:
         arguments.get("sandbox_permissions") == "require_escalated"
         or arguments.get("with_escalated_permissions") is True
     )
+
+
+def _prefix_rule(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value if item is not None]
+    return []
 
 
 def _approval_status_from_output(output: str) -> str:

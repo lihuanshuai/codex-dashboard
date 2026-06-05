@@ -1,7 +1,8 @@
 import { html, nothing } from '../vendor/lit.js';
 import { LightDomElement } from './base.js';
 import { clockFormat, groupTasksByProject, shortPath } from '../utils.js';
-import './project-group.js';
+import './project-group.js?v=20260605b';
+import './live-approval-panel.js?v=20260605b';
 
 class CodexDashboard extends LightDomElement {
   static properties = {
@@ -16,6 +17,8 @@ class CodexDashboard extends LightDomElement {
     clock: { state: true },
     selectedSession: { state: true },
     dialogReady: { state: true },
+    approvalBridge: { state: true },
+    approvalMessage: { state: true },
   };
 
   constructor() {
@@ -31,6 +34,8 @@ class CodexDashboard extends LightDomElement {
     this.clock = clockFormat.format(new Date());
     this.selectedSession = null;
     this.dialogReady = false;
+    this.approvalBridge = null;
+    this.approvalMessage = '';
     this.clockTimer = null;
     this.refreshTimer = null;
   }
@@ -76,12 +81,35 @@ class CodexDashboard extends LightDomElement {
     return this.groups.reduce((sum, group) => sum + group.sessions.length, 0);
   }
 
+  get liveApprovalCallIds() {
+    return this.approvalBridge?.pending_call_ids || [];
+  }
+
+  get desktopPendingApprovals() {
+    const liveIds = new Set(this.liveApprovalCallIds);
+    return this.tasks.flatMap((task) => (task.approval_requests || [])
+      .filter((approval) => approval.status === 'pending' && !liveIds.has(approval.call_id))
+      .map((approval) => ({
+        call_id: approval.call_id,
+        command: approval.command,
+        reason: approval.justification,
+        cwd: task.cwd,
+        thread_id: task.session_id,
+        turn_id: task.id,
+        title: task.session_title || task.user_message || task.session_id,
+      })));
+  }
+
   async load() {
-    const res = await fetch(`/api/tasks?limit=${encodeURIComponent(this.limit)}`);
+    const [res, bridgeRes] = await Promise.all([
+      fetch(`/api/tasks?limit=${encodeURIComponent(this.limit)}`),
+      fetch('/api/approval-bridge/status?connect=true'),
+    ]);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     this.tasks = data.tasks;
     this.summary = data.summary;
+    if (bridgeRes.ok) this.approvalBridge = await bridgeRes.json();
     this.updatedLabel = `更新于 ${clockFormat.format(new Date())}`;
   }
 
@@ -93,6 +121,60 @@ class CodexDashboard extends LightDomElement {
 
   closeSession() {
     this.selectedSession = null;
+  }
+
+  async handleApprovalDecision(event) {
+    event.stopPropagation();
+    const { session, approval, decision } = event.detail;
+    const label = decision === 'decline' ? '拒绝' : (decision === 'accept_for_session' ? '本会话批准' : '批准本次');
+    const command = approval.command || approval.justification || approval.call_id;
+    if (!window.confirm(`${label}这个权限请求？\n\n${command}`)) return;
+
+    this.approvalMessage = `${label}中...`;
+    try {
+      const res = await fetch('/api/approval/decision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file: session?.file,
+          session_id: session?.session_id,
+          turn_id: approval.turn_id,
+          call_id: approval.call_id,
+          decision,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+      this.approvalMessage = data.message || '审批决定已发送，等待 Codex 写回结果。';
+      window.setTimeout(() => this.load().catch(console.error), 1200);
+    } catch (error) {
+      this.approvalMessage = `审批失败：${error.message}`;
+      await this.refreshApprovalBridge();
+    }
+  }
+
+  async handleDesktopOpenThread(event) {
+    event.stopPropagation();
+    const threadId = event.detail?.threadId;
+    if (!threadId) return;
+    this.approvalMessage = '正在打开 Codex Desktop 原会话...';
+    try {
+      const res = await fetch('/api/desktop/open-thread', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ thread_id: threadId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+      this.approvalMessage = data.message || '已请求 Codex Desktop 打开原会话。';
+    } catch (error) {
+      this.approvalMessage = `打开 Desktop 会话失败：${error.message}`;
+    }
+  }
+
+  async refreshApprovalBridge() {
+    const res = await fetch('/api/approval-bridge/status?connect=true');
+    if (res.ok) this.approvalBridge = await res.json();
   }
 
   render() {
@@ -151,9 +233,14 @@ class CodexDashboard extends LightDomElement {
               <div class="panel-title">按项目 / 会话组织</div>
               <div class="meta">${this.sessionCount} 个会话 / ${this.filteredTasks.length} 个 turn</div>
             </div>
-            <div class="tasks" @open-session=${this.openSession}>
+            <div
+              class="tasks"
+              @open-session=${this.openSession}
+              @approval-decision=${this.handleApprovalDecision}
+              @desktop-open-thread=${this.handleDesktopOpenThread}
+            >
               ${groups.length
-                ? groups.map((group) => html`<codex-project-group .group=${group}></codex-project-group>`)
+                ? groups.map((group) => html`<codex-project-group .group=${group} .liveApprovalCallIds=${this.liveApprovalCallIds}></codex-project-group>`)
                 : html`<div class="empty">没有匹配任务</div>`}
             </div>
           </div>
@@ -167,6 +254,22 @@ class CodexDashboard extends LightDomElement {
                   `)
                   : html`<div class="empty">暂无工作区数据</div>`}
               </div>
+            </div>
+            <div class="panel">
+              <div class="panel-title">网页审批</div>
+              <div class="bridge-card ${this.approvalBridge?.connected ? 'connected' : ''}">
+                <span class="badge ${this.approvalBridge?.connected ? 'completed' : 'approval-pending'}">
+                  ${this.approvalBridge?.connected ? 'connected' : 'bridge'}
+                </span>
+                ${this.approvalBridge?.pending ? html`<span class="badge approval-pending">${this.approvalBridge.pending} 实时待审批</span>` : nothing}
+                <p>${this.approvalMessage || this.approvalBridge?.message || '正在检查审批桥状态...'}</p>
+                ${this.approvalBridge?.socket ? html`<code title=${this.approvalBridge.socket}>${shortPath(this.approvalBridge.socket)}</code>` : nothing}
+              </div>
+              <codex-live-approval-panel
+                .approvals=${this.approvalBridge?.live_approvals || []}
+                .desktopApprovals=${this.desktopPendingApprovals}
+                @desktop-open-thread=${this.handleDesktopOpenThread}
+              ></codex-live-approval-panel>
             </div>
             <div class="panel">
               <div class="panel-title">状态说明</div>

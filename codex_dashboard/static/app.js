@@ -1,1 +1,1 @@
-import './components/dashboard.js';
+import './components/dashboard.js?v=20260605b';
