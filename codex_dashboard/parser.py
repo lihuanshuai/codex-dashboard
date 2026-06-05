@@ -10,6 +10,17 @@ from typing import Any, Iterable
 from pydantic import BaseModel, Field, computed_field
 
 
+class ApprovalRequest(BaseModel):
+    call_id: str
+    tool: str
+    command: str = ""
+    justification: str = ""
+    status: str = "pending"
+    requested_at: str | None = None
+    resolved_at: str | None = None
+    output_preview: str = ""
+
+
 class TaskTurn(BaseModel):
     id: str
     session_id: str
@@ -33,12 +44,23 @@ class TaskTurn(BaseModel):
     function_calls: int = 0
     shell_calls: int = 0
     tool_names: dict[str, int] = Field(default_factory=dict)
+    approval_requests: list[ApprovalRequest] = Field(default_factory=list)
     error: str | None = None
 
     @computed_field
     @property
     def project(self) -> str:
         return project_name(self.cwd)
+
+    @computed_field
+    @property
+    def approval_pending_count(self) -> int:
+        return sum(1 for request in self.approval_requests if request.status == "pending")
+
+    @computed_field
+    @property
+    def approval_denied_count(self) -> int:
+        return sum(1 for request in self.approval_requests if request.status == "denied")
 
 
 class ConversationMessage(BaseModel):
@@ -146,6 +168,7 @@ def parse_session_file(path: Path, *, source: str) -> list[TaskTurn]:
     session_title = ""
     last_session_usage = {"total": 0, "input": 0, "output": 0}
     turn_baselines: dict[str, dict[str, int]] = {}
+    approvals_by_call_id: dict[str, ApprovalRequest] = {}
 
     try:
         fh: Iterable[str] = path.open("r", encoding="utf-8")
@@ -241,6 +264,18 @@ def parse_session_file(path: Path, *, source: str) -> list[TaskTurn]:
                     current_turn.tool_names[name] = current_turn.tool_names.get(name, 0) + 1
                     if name == "exec_command":
                         current_turn.shell_calls += 1
+                    approval = _extract_approval_request(payload, item.get("timestamp"))
+                    if approval:
+                        current_turn.approval_requests.append(approval)
+                        approvals_by_call_id[approval.call_id] = approval
+                elif rtype == "function_call_output":
+                    call_id = str(payload.get("call_id") or "")
+                    approval = approvals_by_call_id.get(call_id)
+                    if approval:
+                        output = str(payload.get("output") or "")
+                        approval.status = _approval_status_from_output(output)
+                        approval.resolved_at = _from_epoch_or_iso(None, item.get("timestamp"))
+                        approval.output_preview = _clean_text(output)[:240]
                 elif rtype == "message" and payload.get("role") == "user" and not current_turn.user_message:
                     current_turn.user_message = _clean_text(_extract_content_text(payload.get("content")))
                 elif rtype == "message" and payload.get("role") == "assistant":
@@ -327,11 +362,15 @@ def summarize(tasks: list[TaskTurn]) -> dict[str, Any]:
     by_source: dict[str, int] = {}
     active_cwds: dict[str, int] = {}
     by_project: dict[str, int] = {}
+    approvals = {"total": 0, "pending": 0, "approved": 0, "denied": 0}
     for task in tasks:
         by_status[task.status] = by_status.get(task.status, 0) + 1
         by_source[task.source] = by_source.get(task.source, 0) + 1
         project = project_name(task.cwd)
         by_project[project] = by_project.get(project, 0) + 1
+        for request in task.approval_requests:
+            approvals["total"] += 1
+            approvals[request.status] = approvals.get(request.status, 0) + 1
         if task.cwd:
             active_cwds[task.cwd] = active_cwds.get(task.cwd, 0) + 1
 
@@ -340,6 +379,7 @@ def summarize(tasks: list[TaskTurn]) -> dict[str, Any]:
         "by_status": by_status,
         "by_source": by_source,
         "by_project": by_project,
+        "approvals": approvals,
         "top_projects": sorted(by_project.items(), key=lambda item: item[1], reverse=True)[:8],
         "top_cwds": sorted(active_cwds.items(), key=lambda item: item[1], reverse=True)[:8],
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -373,6 +413,59 @@ def _apply_token_count(
         task.token_input = _first_int(usage, "input_tokens", "prompt_tokens") or task.token_input
         task.token_output = _first_int(usage, "output_tokens", "completion_tokens") or task.token_output
     return previous_session_usage
+
+
+def _extract_approval_request(payload: dict[str, Any], timestamp: Any) -> ApprovalRequest | None:
+    arguments = _parse_arguments(payload.get("arguments"))
+    if not _requires_approval(arguments):
+        return None
+
+    call_id = str(payload.get("call_id") or "")
+    if not call_id:
+        return None
+    return ApprovalRequest(
+        call_id=call_id,
+        tool=str(payload.get("name") or "unknown"),
+        command=str(arguments.get("cmd") or arguments.get("command") or ""),
+        justification=str(arguments.get("justification") or ""),
+        requested_at=_from_epoch_or_iso(None, timestamp),
+    )
+
+
+def _parse_arguments(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
+def _requires_approval(arguments: dict[str, Any]) -> bool:
+    return (
+        arguments.get("sandbox_permissions") == "require_escalated"
+        or arguments.get("with_escalated_permissions") is True
+    )
+
+
+def _approval_status_from_output(output: str) -> str:
+    lowered = output.lower()
+    denial_markers = (
+        "rejected by user",
+        "this action was rejected",
+        'rejected("',
+        "rejected('",
+        "approval denied",
+        "not approved",
+        "permission denied by user",
+    )
+    if any(marker in lowered for marker in denial_markers):
+        return "denied"
+    return "approved"
 
 
 def _first_int(values: dict[str, Any], *keys: str) -> int | None:

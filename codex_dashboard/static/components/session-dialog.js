@@ -1,4 +1,4 @@
-import { html } from 'lit';
+import { html } from '../vendor/lit.js';
 import { LightDomElement } from './base.js';
 import { shortPath } from '../utils.js';
 import './conversation-message.js';

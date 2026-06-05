@@ -83,6 +83,10 @@ export function buildSessions(tasks) {
         error: 0,
         function_calls: 0,
         shell_calls: 0,
+        approval_requests: [],
+        approval_total: 0,
+        approval_pending: 0,
+        approval_denied: 0,
         token_total: 0,
         last_at: 0,
         originator: task.originator || '',
@@ -99,6 +103,11 @@ export function buildSessions(tasks) {
     session.error += task.status === 'error' ? 1 : 0;
     session.function_calls += task.function_calls || 0;
     session.shell_calls += task.shell_calls || 0;
+    const approvals = task.approval_requests || [];
+    session.approval_requests.push(...approvals.map((request) => ({ ...request, turn_id: task.id })));
+    session.approval_total += approvals.length;
+    session.approval_pending += task.approval_pending_count || approvals.filter((request) => request.status === 'pending').length;
+    session.approval_denied += task.approval_denied_count || approvals.filter((request) => request.status === 'denied').length;
     session.token_total += task.token_total || 0;
     session.session_title ||= task.session_title || '';
     session.last_at = Math.max(session.last_at, taskTime(task));
@@ -119,6 +128,7 @@ export function buildSessions(tasks) {
       || '(无会话标题)';
     session.last_agent_message = latestWithReply?.last_agent_message || '';
     session.status = session.running ? 'running' : (session.error ? 'error' : 'completed');
+    session.approval_status = session.approval_pending ? 'pending' : (session.approval_denied ? 'denied' : (session.approval_total ? 'resolved' : 'none'));
     session.source_label = Array.from(session.source).sort().join(' + ');
     return session;
   }).sort((a, b) => b.last_at - a.last_at);
@@ -129,14 +139,28 @@ export function groupTasksByProject(tasks) {
   for (const session of buildSessions(tasks)) {
     const project = session.project;
     if (!groups.has(project)) {
-      groups.set(project, { project, cwd: session.cwd, sessions: [], running: 0, completed: 0, error: 0 });
+      groups.set(project, {
+        project,
+        cwd: session.cwd,
+        sessions: [],
+        running: 0,
+        completed: 0,
+        error: 0,
+        approval_pending: 0,
+        approval_denied: 0,
+      });
     }
     const group = groups.get(project);
     group.sessions.push(session);
     group.cwd ||= session.cwd;
     group[session.status] = (group[session.status] || 0) + 1;
+    group.approval_pending += session.approval_pending || 0;
+    group.approval_denied += session.approval_denied || 0;
   }
   return Array.from(groups.values()).sort((a, b) => {
+    const aPending = a.approval_pending || 0;
+    const bPending = b.approval_pending || 0;
+    if (aPending !== bPending) return bPending - aPending;
     const aRunning = a.running || 0;
     const bRunning = b.running || 0;
     if (aRunning !== bRunning) return bRunning - aRunning;

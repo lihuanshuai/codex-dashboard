@@ -1,4 +1,4 @@
-import { html, nothing } from 'lit';
+import { html, nothing } from '../vendor/lit.js';
 import { LightDomElement } from './base.js';
 import { shortPath } from '../utils.js';
 import './session-card.js';
@@ -18,9 +18,11 @@ class CodexProjectGroup extends LightDomElement {
           </div>
           <div class="project-count">
             <span class="badge">${group.sessions.length} sessions</span>
+            ${group.approval_pending ? html`<span class="badge approval-pending">${group.approval_pending} 待审批</span>` : nothing}
             ${group.running ? html`<span class="badge running">${group.running} running</span>` : nothing}
             ${group.completed ? html`<span class="badge completed">${group.completed} done</span>` : nothing}
             ${group.error ? html`<span class="badge error">${group.error} error</span>` : nothing}
+            ${group.approval_denied ? html`<span class="badge approval-denied">${group.approval_denied} denied</span>` : nothing}
           </div>
         </header>
         ${group.sessions.map((session) => html`<codex-session-card .session=${session}></codex-session-card>`)}

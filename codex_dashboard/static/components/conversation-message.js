@@ -1,4 +1,4 @@
-import { html, nothing } from 'lit';
+import { html, nothing } from '../vendor/lit.js';
 import { LightDomElement } from './base.js';
 import { timeAgo } from '../utils.js';
 

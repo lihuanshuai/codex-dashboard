@@ -1,4 +1,4 @@
-import { html, nothing } from 'lit';
+import { html, nothing } from '../vendor/lit.js';
 import { LightDomElement } from './base.js';
 import { clockFormat, groupTasksByProject, shortPath } from '../utils.js';
 import './project-group.js';
@@ -53,10 +53,15 @@ class CodexDashboard extends LightDomElement {
   get filteredTasks() {
     const query = this.query.trim().toLowerCase();
     return this.tasks.filter((task) => {
-      if (this.statusFilter !== 'all' && task.status !== this.statusFilter) return false;
+      if (this.statusFilter === 'approval_pending' && !(task.approval_pending_count > 0)) return false;
+      if (this.statusFilter === 'approval_denied' && !(task.approval_denied_count > 0)) return false;
+      if (!['all', 'approval_pending', 'approval_denied'].includes(this.statusFilter) && task.status !== this.statusFilter) return false;
       if (this.sourceFilter !== 'all' && task.source !== this.sourceFilter) return false;
       if (!query) return true;
-      return [task.user_message, task.cwd, task.project, task.last_agent_message, task.session_id]
+      const approvalText = (task.approval_requests || [])
+        .map((request) => [request.command, request.justification, request.status].filter(Boolean).join(' '))
+        .join('\n');
+      return [task.user_message, task.cwd, task.project, task.last_agent_message, task.session_id, approvalText]
         .filter(Boolean).join('\n').toLowerCase().includes(query);
     });
   }
@@ -110,6 +115,8 @@ class CodexDashboard extends LightDomElement {
           <select class="select" .value=${this.statusFilter} @change=${(event) => { this.statusFilter = event.target.value; }}>
             <option value="all">全部状态</option>
             <option value="running">运行中</option>
+            <option value="approval_pending">待审批</option>
+            <option value="approval_denied">审批拒绝</option>
             <option value="completed">已完成</option>
             <option value="error">错误</option>
           </select>
@@ -128,7 +135,7 @@ class CodexDashboard extends LightDomElement {
         <section class="metrics">
           <div class="metric"><div class="value">${this.summary?.total ?? this.tasks.length}</div><div class="name">已扫描任务</div></div>
           <div class="metric"><div class="value">${this.summary?.by_status?.running ?? 0}</div><div class="name">运行中</div></div>
-          <div class="metric"><div class="value">${this.summary?.by_status?.completed ?? 0}</div><div class="name">已完成</div></div>
+          <div class="metric"><div class="value">${this.summary?.approvals?.pending ?? 0}</div><div class="name">权限待审批</div></div>
           <div class="metric"><div class="value">${this.summary?.by_source?.archived ?? 0}</div><div class="name">归档任务</div></div>
         </section>
 
@@ -159,8 +166,10 @@ class CodexDashboard extends LightDomElement {
               <div class="panel-title">状态说明</div>
               <div class="legend">
                 <span class="badge running">running</span>
+                <span class="badge approval-pending">待审批</span>
                 <span class="badge completed">completed</span>
                 <span class="badge error">error</span>
+                <span class="badge approval-denied">denied</span>
               </div>
             </div>
           </aside>
