@@ -104,7 +104,7 @@
     }
     .toolbar {
       display: grid;
-      grid-template-columns: 1fr repeat(3, auto);
+      grid-template-columns: minmax(220px, 1fr) repeat(4, auto);
       gap: 12px;
       margin: 22px 0;
       animation: rise .65s ease-out both;

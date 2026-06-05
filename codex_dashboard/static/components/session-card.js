@@ -30,7 +30,7 @@ class CodexSessionCard extends LightDomElement {
           <span class="badge ${session.status}">${session.status}</span>
           ${session.approval_pending ? html`<span class="badge approval-pending">${session.approval_pending} 待审批</span>` : nothing}
           ${!session.approval_pending && session.approval_denied ? html`<span class="badge approval-denied">${session.approval_denied} 已拒绝</span>` : nothing}
-          <div class="meta">${session.source_label} · ${timeAgo(latest.started_at || latest.completed_at)}</div>
+          <div class="meta">${session.source_label} · ${timeAgo(latest.updated_at || latest.completed_at || latest.started_at)}</div>
         </div>
         <div>
           <div class="session-title" title=${session.title}>${session.title}</div>

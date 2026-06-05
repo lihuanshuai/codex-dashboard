@@ -58,14 +58,26 @@ export function duration(ms) {
 }
 
 function taskTime(task) {
-  return new Date(task.started_at || task.completed_at || 0).getTime() || 0;
+  return new Date(task.updated_at || task.completed_at || task.started_at || 0).getTime() || 0;
 }
 
 function sessionKey(task) {
   return task.session_id || task.file || task.id;
 }
 
-export function buildSessions(tasks) {
+function priorityScore(item) {
+  return (item.approval_pending || item.running) ? 1 : 0;
+}
+
+function compareBySortMode(a, b, sortMode) {
+  if (sortMode === 'priority') {
+    const priorityDiff = priorityScore(b) - priorityScore(a);
+    if (priorityDiff !== 0) return priorityDiff;
+  }
+  return (b.last_at || 0) - (a.last_at || 0);
+}
+
+export function buildSessions(tasks, sortMode = 'priority') {
   const sessions = new Map();
   for (const task of tasks) {
     const key = sessionKey(task);
@@ -110,8 +122,9 @@ export function buildSessions(tasks) {
     session.approval_denied += task.approval_denied_count || approvals.filter((request) => request.status === 'denied').length;
     session.token_total += task.token_total || 0;
     session.session_title ||= task.session_title || '';
-    session.last_at = Math.max(session.last_at, taskTime(task));
-    if (taskTime(task) >= session.last_at) {
+    const updatedAt = taskTime(task);
+    session.last_at = Math.max(session.last_at, updatedAt);
+    if (updatedAt >= session.last_at) {
       session.project = projectName(task);
       session.cwd = task.cwd || session.cwd;
       session.originator = task.originator || session.originator;
@@ -131,12 +144,12 @@ export function buildSessions(tasks) {
     session.approval_status = session.approval_pending ? 'pending' : (session.approval_denied ? 'denied' : (session.approval_total ? 'resolved' : 'none'));
     session.source_label = Array.from(session.source).sort().join(' + ');
     return session;
-  }).sort((a, b) => b.last_at - a.last_at);
+  }).sort((a, b) => compareBySortMode(a, b, sortMode));
 }
 
-export function groupTasksByProject(tasks) {
+export function groupTasksByProject(tasks, sortMode = 'priority') {
   const groups = new Map();
-  for (const session of buildSessions(tasks)) {
+  for (const session of buildSessions(tasks, sortMode)) {
     const project = session.project;
     if (!groups.has(project)) {
       groups.set(project, {
@@ -148,6 +161,7 @@ export function groupTasksByProject(tasks) {
         error: 0,
         approval_pending: 0,
         approval_denied: 0,
+        last_at: 0,
       });
     }
     const group = groups.get(project);
@@ -156,14 +170,7 @@ export function groupTasksByProject(tasks) {
     group[session.status] = (group[session.status] || 0) + 1;
     group.approval_pending += session.approval_pending || 0;
     group.approval_denied += session.approval_denied || 0;
+    group.last_at = Math.max(group.last_at, session.last_at || 0);
   }
-  return Array.from(groups.values()).sort((a, b) => {
-    const aPending = a.approval_pending || 0;
-    const bPending = b.approval_pending || 0;
-    if (aPending !== bPending) return bPending - aPending;
-    const aRunning = a.running || 0;
-    const bRunning = b.running || 0;
-    if (aRunning !== bRunning) return bRunning - aRunning;
-    return (b.sessions[0]?.last_at || 0) - (a.sessions[0]?.last_at || 0);
-  });
+  return Array.from(groups.values()).sort((a, b) => compareBySortMode(a, b, sortMode));
 }

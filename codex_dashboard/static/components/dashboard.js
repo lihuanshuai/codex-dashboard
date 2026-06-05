@@ -10,6 +10,7 @@ class CodexDashboard extends LightDomElement {
     query: { state: true },
     statusFilter: { state: true },
     sourceFilter: { state: true },
+    sortMode: { state: true },
     limit: { state: true },
     updatedLabel: { state: true },
     clock: { state: true },
@@ -24,6 +25,7 @@ class CodexDashboard extends LightDomElement {
     this.query = '';
     this.statusFilter = 'all';
     this.sourceFilter = 'all';
+    this.sortMode = 'priority';
     this.limit = '80';
     this.updatedLabel = '等待加载';
     this.clock = clockFormat.format(new Date());
@@ -67,7 +69,7 @@ class CodexDashboard extends LightDomElement {
   }
 
   get groups() {
-    return groupTasksByProject(this.filteredTasks);
+    return groupTasksByProject(this.filteredTasks, this.sortMode);
   }
 
   get sessionCount() {
@@ -124,6 +126,10 @@ class CodexDashboard extends LightDomElement {
             <option value="all">全部来源</option>
             <option value="active">当前会话</option>
             <option value="archived">归档</option>
+          </select>
+          <select class="select" .value=${this.sortMode} @change=${(event) => { this.sortMode = event.target.value; }}>
+            <option value="priority">运行中 / 待审批优先</option>
+            <option value="updated">仅按最近更新</option>
           </select>
           <select class="select" .value=${this.limit} @change=${(event) => { this.limit = event.target.value; this.load().catch(console.error); }}>
             <option value="80">最近 80 个</option>

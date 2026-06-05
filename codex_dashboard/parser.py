@@ -30,6 +30,7 @@ class TaskTurn(BaseModel):
     originator: str | None = None
     cli_version: str | None = None
     started_at: str | None = None
+    updated_at: str | None = None
     completed_at: str | None = None
     duration_ms: int | None = None
     status: str = "running"
@@ -154,7 +155,7 @@ def parse_tasks(
             # A buffer keeps sorting by actual start time accurate without scanning everything.
             break
 
-    tasks.sort(key=lambda task: _sort_time(task.started_at, task.completed_at), reverse=True)
+    tasks.sort(key=lambda task: _sort_time(task.updated_at, task.completed_at, task.started_at), reverse=True)
     return tasks[:limit]
 
 
@@ -169,6 +170,7 @@ def parse_session_file(path: Path, *, source: str) -> list[TaskTurn]:
     last_session_usage = {"total": 0, "input": 0, "output": 0}
     turn_baselines: dict[str, dict[str, int]] = {}
     approvals_by_call_id: dict[str, ApprovalRequest] = {}
+    approval_tasks_by_call_id: dict[str, TaskTurn] = {}
 
     try:
         fh: Iterable[str] = path.open("r", encoding="utf-8")
@@ -193,6 +195,7 @@ def parse_session_file(path: Path, *, source: str) -> list[TaskTurn]:
 
             typ = item.get("type")
             payload = item.get("payload") or {}
+            item_time = _from_epoch_or_iso(None, item.get("timestamp"))
             if typ == "session_meta":
                 meta = payload
                 session_id = meta.get("id") or session_id
@@ -226,15 +229,18 @@ def parse_session_file(path: Path, *, source: str) -> list[TaskTurn]:
                         turns[turn_id] = current_turn
                     current_turn.status = "running"
                     current_turn.started_at = _from_epoch_or_iso(payload.get("started_at"), item.get("timestamp"))
+                    current_turn.updated_at = current_turn.started_at or item_time
                     current_turn.model_context_window = payload.get("model_context_window")
                     current_turn.collaboration_mode = payload.get("collaboration_mode_kind")
                     turn_baselines[turn_id] = dict(last_session_usage)
                 elif event_type == "user_message" and current_turn:
                     current_turn.user_message = _clean_text(payload.get("message") or current_turn.user_message)
+                    current_turn.updated_at = item_time or current_turn.updated_at
                     if current_turn.user_message and not session_title:
                         session_title = extract_session_title(payload.get("message") or current_turn.user_message)
                 elif event_type == "agent_message" and current_turn:
                     current_turn.last_agent_message = _clean_text(payload.get("message") or current_turn.last_agent_message)
+                    current_turn.updated_at = item_time or current_turn.updated_at
                 elif event_type == "token_count" and current_turn:
                     last_session_usage = _apply_token_count(
                         current_turn,
@@ -242,12 +248,14 @@ def parse_session_file(path: Path, *, source: str) -> list[TaskTurn]:
                         baseline=turn_baselines.get(current_turn.id),
                         previous_session_usage=last_session_usage,
                     )
+                    current_turn.updated_at = item_time or current_turn.updated_at
                 elif event_type == "task_complete":
                     turn_id = payload.get("turn_id")
                     task = turns.get(turn_id) if turn_id else current_turn
                     if task:
                         task.status = "completed"
                         task.completed_at = _from_epoch_or_iso(payload.get("completed_at"), item.get("timestamp"))
+                        task.updated_at = task.completed_at or item_time or task.updated_at
                         task.duration_ms = payload.get("duration_ms")
                         task.last_agent_message = _clean_text(
                             payload.get("last_agent_message") or task.last_agent_message
@@ -258,6 +266,7 @@ def parse_session_file(path: Path, *, source: str) -> list[TaskTurn]:
 
             if typ == "response_item" and current_turn:
                 rtype = payload.get("type")
+                current_turn.updated_at = item_time or current_turn.updated_at
                 if rtype == "function_call":
                     name = str(payload.get("name") or "unknown")
                     current_turn.function_calls += 1
@@ -268,6 +277,7 @@ def parse_session_file(path: Path, *, source: str) -> list[TaskTurn]:
                     if approval:
                         current_turn.approval_requests.append(approval)
                         approvals_by_call_id[approval.call_id] = approval
+                        approval_tasks_by_call_id[approval.call_id] = current_turn
                 elif rtype == "function_call_output":
                     call_id = str(payload.get("call_id") or "")
                     approval = approvals_by_call_id.get(call_id)
@@ -276,6 +286,9 @@ def parse_session_file(path: Path, *, source: str) -> list[TaskTurn]:
                         approval.status = _approval_status_from_output(output)
                         approval.resolved_at = _from_epoch_or_iso(None, item.get("timestamp"))
                         approval.output_preview = _clean_text(output)[:240]
+                        approval_task = approval_tasks_by_call_id.get(call_id)
+                        if approval_task:
+                            approval_task.updated_at = item_time or approval_task.updated_at
                 elif rtype == "message" and payload.get("role") == "user" and not current_turn.user_message:
                     current_turn.user_message = _clean_text(_extract_content_text(payload.get("content")))
                 elif rtype == "message" and payload.get("role") == "assistant":
